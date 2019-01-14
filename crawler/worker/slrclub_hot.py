@@ -1,0 +1,65 @@
+""":mod:`crawler.worker.slrclub` ---  Crawler for Slrclub
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+"""
+import logging
+import time
+import random
+
+from .base import BaseSite
+from ..exc import SkipCrawler
+from ..serializers import payload_serializer
+
+logger = logging.getLogger(__name__)
+
+
+class Slrclub_Hot(BaseSite):
+
+    def __init__(self, *, threshold=15, page_max=20):
+        BaseSite.__init__(self)
+        self.threshold = threshold
+        self.pageMax = page_max
+
+    def crawler(self):
+        l = logger.getChild('Slrclub_hot.crawler')
+        # for page in range(1, self.pageMax, 1):
+        for page in range(249, self.pageMax, 1):
+            host = 'http://www.slrclub.com/bbs/zboard.php'
+            query = 'id=best_article&page={}&category=1'.format(page)
+            self.url = '{host}?{query}'.format(host=host, query=query)
+            soup = self.crawling(self.url)
+            if soup is None:
+                l.error('{} crawler skip'.format(self.typ211e))
+                raise SkipCrawler
+            yield soup
+
+    def articler(self, link):
+        l = logger.getChild('Slrclub.articler')
+        soup = self.crawling(link)
+        if soup is None:
+            l.error('{} crawler skip'.format(self.type))
+            raise SkipCrawler
+        return soup
+
+    def do(self):
+        l = logger.getChild('Slrclub.do')
+        l.info('start {} crawler'.format(self.type))
+        for soup in self.crawler():
+            for ctx in soup.select('table#bbs_list tbody tr'):
+                if ctx.select('td.list_num'):
+                    text = ctx.a.extract()
+                    _temp = ctx.select('td.sbj')[0].text.strip()
+                    if _temp != '' and int(_temp[1:-1]) >= self.threshold:
+                        _id = text.get('href').split('no=')[1]
+                        _count = _temp[1:-1]
+                        _title = text.text
+                        _link = self.url.split('/bbs')[0] + \
+                            text.get('href')
+
+                        article_soup = self.articler(_link)
+                        _article = article_soup.find('div', {"id": "userct"}).text
+                        obj = payload_serializer(type=self.type, id=_id,
+                                                 link=_link, count=_count,
+                                                 title=_title, article=_article)
+                        time.sleep(random.randrange(2,5))
+                        self.insert_or_update_postgres(obj)
